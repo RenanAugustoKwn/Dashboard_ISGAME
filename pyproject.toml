@@ -1,0 +1,23 @@
+[project]
+name = "dashboardisgame"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Renan Augusto Ferreira",email = "renanaugustokwn@outlook.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit (>=1.58.0,<2.0.0)",
+    "pandas (>=3.0.3,<4.0.0)",
+    "numpy (>=2.4.6,<3.0.0)",
+    "plotly (>=6.7.0,<7.0.0)",
+    "openpyxl (>=3.1.5,<4.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "dashboardisgame", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
