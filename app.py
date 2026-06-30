@@ -4,6 +4,7 @@ import numpy as np
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
+from pathlib import Path
 
 # =====================================================
 # CONFIG
@@ -57,19 +58,44 @@ st.markdown("""
 @st.cache_data
 def carregar_dados():
 
-    df = pd.read_excel(
-        "Resultados_Pesquisas.xlsx",
-        engine="openpyxl"
+    pasta_raiz = Path("dados")
+
+    arquivos = list(
+        pasta_raiz.glob("*/resultado_final.xlsx")
     )
 
-    df.columns = (
-        df.columns
-        .astype(str)
-        .str.strip()
+    dfs = []
+
+    for arquivo in arquivos:
+
+        try:
+
+            df = pd.read_excel(
+                arquivo,
+                engine="openpyxl"
+            )
+
+            df.columns = (
+                df.columns
+                .astype(str)
+                .str.strip()
+            )
+
+            # Nome da pasta = Unidade
+            df["Unidade"] = arquivo.parent.name
+
+            dfs.append(df)
+
+        except Exception as e:
+            st.warning(f"Erro ao carregar {arquivo}: {e}")
+
+    if len(dfs) == 0:
+        return pd.DataFrame()
+
+    return pd.concat(
+        dfs,
+        ignore_index=True
     )
-
-    return df
-
 
 df = carregar_dados()
 
@@ -81,57 +107,6 @@ st.success(
     f"Registros carregados: {len(df)}"
 )
 
-# =====================================================
-# IDADE
-# =====================================================
-
-ano_atual = datetime.now().year
-
-if "Demografico.anoNascimento" in df.columns:
-
-    df["Idade"] = (
-        ano_atual -
-        pd.to_numeric(
-            df["Demografico.anoNascimento"],
-            errors="coerce"
-        )
-    )
-
-elif "Demografico_Nascimento" in df.columns:
-
-    df["Idade"] = (
-        ano_atual -
-        pd.to_numeric(
-            df["Demografico_Nascimento"],
-            errors="coerce"
-        )
-    )
-
-else:
-    df["Idade"] = np.nan
-
-
-def faixa_etaria(idade):
-
-    if pd.isna(idade):
-        return "Não informado"
-
-    if idade < 50:
-        return "<50"
-
-    if idade < 60:
-        return "50-59"
-
-    if idade < 70:
-        return "60-69"
-
-    if idade < 80:
-        return "70-79"
-
-    return "80+"
-
-
-df["FaixaEtaria"] = df["Idade"].apply(faixa_etaria)
 
 # =====================================================
 # HEADER
@@ -142,78 +117,47 @@ st.title("🏥 Dashboard Saúde e Bem-Estar")
 st.caption(
     "Indicadores de Qualidade de Vida, Saúde Física, Memória e Humor"
 )
-
 # =====================================================
-# FILTROS
+# FUNÇÕES AUXILIARES
 # =====================================================
 
-st.sidebar.title("Filtros")
+def encontrar_coluna(final_nome):
+    """
+    Procura uma coluna pelo final do nome,
+    ignorando maiúsculas/minúsculas.
 
-total_original = len(df)
+    Exemplo:
+        respostasDemografico.sexo
+        respostasDemografico.dataNascimento
+        respostasHumor.felicidade
+    """
 
-if "Unidade" in df.columns:
+    final_nome = final_nome.lower()
 
-    df["Unidade"] = (
-        df["Unidade"]
-        .fillna("Sem Unidade")
+    for coluna in df.columns:
+        if coluna.lower().endswith(final_nome):
+            return coluna
+
+    return None
+
+
+def percentual(final_coluna, valor):
+
+    coluna = encontrar_coluna(final_coluna)
+
+    if coluna is None:
+        return 0.0
+
+    serie = (
+        df[coluna]
+        .fillna("")
         .astype(str)
         .str.strip()
+        .str.lower()
     )
-
-    df.loc[
-        df["Unidade"].isin([
-            "",
-            "nan",
-            "None",
-            "N/A"
-        ]),
-        "Unidade"
-    ] = "Sem Unidade"
-
-    unidades = sorted(
-        df["Unidade"]
-        .unique()
-        .tolist()
-    )
-
-    unidades_selecionadas = st.sidebar.multiselect(
-        "Unidades",
-        options=unidades,
-        default=unidades
-    )
-
-    df = df[
-        df["Unidade"]
-        .isin(unidades_selecionadas)
-    ]
-
-st.sidebar.metric(
-    "Total Excel",
-    total_original
-)
-
-st.sidebar.metric(
-    "Após filtros",
-    len(df)
-)
-
-# =====================================================
-# KPIS
-# =====================================================
-
-def percentual(coluna, valor):
-
-    if coluna not in df.columns:
-        return 0
 
     return round(
-        (
-            df[coluna]
-            .astype(str)
-            .str.strip()
-            .eq(valor)
-            .mean()
-        ) * 100,
+        serie.eq(str(valor).strip().lower()).mean() * 100,
         1
     )
 
@@ -230,61 +174,216 @@ def kpi(titulo, valor):
         unsafe_allow_html=True
     )
 
+# =====================================================
+# IDADE
+# =====================================================
 
-col1,col2,col3,col4,col5 = st.columns(5)
+col_nascimento = (
+    encontrar_coluna("Demografico.dataNascimento")
+    or encontrar_coluna("Demografico.anoNascimento")
+)
+
+if col_nascimento:
+
+    nascimento = pd.to_datetime(
+        df[col_nascimento],
+        errors="coerce",
+        dayfirst=True
+    )
+
+    hoje = pd.Timestamp.today()
+
+    df["Idade"] = (
+        hoje.year
+        - nascimento.dt.year
+        - (
+            (hoje.month < nascimento.dt.month)
+            | (
+                (hoje.month == nascimento.dt.month)
+                & (hoje.day < nascimento.dt.day)
+            )
+        ).astype(int)
+    )
+
+else:
+
+    df["Idade"] = np.nan
+
+
+def faixa_etaria(idade):
+
+    if pd.isna(idade):
+        return "Não informado"
+
+    if idade < 50:
+        return "<50"
+    elif idade < 60:
+        return "50-59"
+    elif idade < 70:
+        return "60-69"
+    elif idade < 80:
+        return "70-79"
+    else:
+        return "80+"
+
+
+df["FaixaEtaria"] = df["Idade"].apply(faixa_etaria)
+# =====================================================
+# FILTROS
+# =====================================================
+
+st.sidebar.title("Filtros")
+
+total_original = len(df)
+
+if "Unidade" not in df.columns:
+    df["Unidade"] = "Sem Unidade"
+
+df["Unidade"] = (
+    df["Unidade"]
+    .fillna("Sem Unidade")
+    .astype(str)
+    .str.strip()
+)
+
+df.loc[
+    df["Unidade"].isin([
+        "",
+        "nan",
+        "None",
+        "N/A"
+    ]),
+    "Unidade"
+] = "Sem Unidade"
+
+unidades = sorted(df["Unidade"].unique())
+
+unidades_selecionadas = st.sidebar.multiselect(
+    "Unidades",
+    options=unidades,
+    default=unidades
+)
+
+df = df[
+    df["Unidade"].isin(unidades_selecionadas)
+]
+
+st.sidebar.metric(
+    "Total de Registros",
+    total_original
+)
+
+st.sidebar.metric(
+    "Após Filtro",
+    len(df)
+)
+
+# =====================================================
+# COLUNAS ENCONTRADAS (DEBUG)
+# =====================================================
+
+COL_SEXO = encontrar_coluna("sexo")
+COL_MORA_SOZINHO = encontrar_coluna("moraSozinho")
+COL_TCLE = encontrar_coluna("participanteTCLE")
+COL_NASCIMENTO = (
+    encontrar_coluna("dataNascimento")
+    or encontrar_coluna("anoNascimento")
+)
+# =====================================================
+# PARTICIPANTES TCLE
+# =====================================================
+
+participantes_tcle = 0
+
+col_tcle = encontrar_coluna("participanteTCLE")
+
+if col_tcle:
+
+    participantes_tcle = (
+        df[col_tcle]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .isin(["true", "sim", "1"])
+        .sum()
+    )
+
+# =====================================================
+# IDADE MÉDIA
+# =====================================================
+
+idade_media = "-"
+
+col_nascimento = encontrar_coluna("Demografico.anoNascimento")
+
+if col_nascimento:
+
+    df["Idade"] = (
+        datetime.now().year -
+        pd.to_numeric(
+            df[col_nascimento],
+            errors="coerce"
+        )
+    )
+
+    idade_media = round(df["Idade"].mean(), 1)
+
+# =====================================================
+# KPIs
+# =====================================================
+
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
-    kpi("Participantes", len(df))
+    kpi("Participantes", participantes_tcle)
 
 with col2:
-    kpi(
-        "Idade Média",
-        round(df["Idade"].mean(),1)
-    )
+    kpi("Registros", len(df))
 
 with col3:
-    kpi(
-        "% Mulheres",
-        f"{percentual('Demografico_Sexo','Feminino')}%"
-    )
+    kpi("Idade Média", idade_media)
 
 with col4:
     kpi(
-        "% Homens",
-        f"{percentual('Demografico_Sexo','Masculino')}%"
+        "% Mulheres",
+        f"{percentual('Demografico.sexo', 'Feminino')}%"
     )
 
 with col5:
     kpi(
+        "% Homens",
+        f"{percentual('Demografico.sexo', 'Masculino')}%"
+    )
+
+with col6:
+    kpi(
         "% Mora Sozinho",
-        f"{percentual('Pergunta: Mora_Sozinho','Sim')}%"
+        f"{percentual('Demografico.moraSozinho', 'Sim')}%"
     )
 
 st.divider()
-
 # =====================================================
 # DEMOGRÁFICO
 # =====================================================
 
-c1,c2 = st.columns(2)
+c1, c2 = st.columns(2)
 
 with c1:
 
     faixa_df = (
         df["FaixaEtaria"]
+        .dropna()
         .value_counts()
-        .reset_index()
+        .rename_axis("Faixa")
+        .reset_index(name="Quantidade")
     )
-
-    faixa_df.columns = [
-        "Faixa",
-        "Quantidade"
-    ]
 
     fig = px.bar(
         faixa_df,
         x="Faixa",
         y="Quantidade",
+        text="Quantidade",
         title="Distribuição por Faixa Etária"
     )
 
@@ -295,168 +394,13 @@ with c1:
 
 with c2:
 
-    if "Demografico_Sexo" in df.columns:
+    if "respostasDemografico.sexo" in df.columns:
 
         fig = px.pie(
             df,
-            names="Demografico_Sexo",
+            names="respostasDemografico.sexo",
             hole=.55,
             title="Sexo"
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
-
-# =====================================================
-# BEM ESTAR
-# =====================================================
-
-st.subheader("Índice Geral de Bem-Estar")
-
-bem_estar = percentual(
-    "Estrela do Bem-estar",
-    "Sim"
-)
-
-fig = go.Figure(
-    go.Indicator(
-        mode="gauge+number",
-        value=bem_estar,
-        title={"text":"Bem-estar (%)"}
-    )
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
-
-# =====================================================
-# RADAR
-# =====================================================
-
-MAP = {
-    "Sempre":100,
-    "Sim":100,
-    "Excelente":100,
-    "Boa":75,
-    "Regular":50,
-    "Às vezes":50,
-    "Não":0,
-    "Nunca":0
-}
-
-
-def score(col):
-
-    if col not in df.columns:
-        return 0
-
-    serie = (
-        df[col]
-        .astype(str)
-        .str.strip()
-        .map(MAP)
-    )
-
-    return (
-        float(serie.mean())
-        if serie.notna().any()
-        else 0
-    )
-
-
-st.subheader("Radar de Qualidade de Vida")
-
-radar = {
-    "Nutrição": np.nanmean([
-        score("Nutricao_ComeVerduras"),
-        score("Nutricao_FazQuatroRefeicoes")
-    ]),
-    "Atividade Física": np.nanmean([
-        score("AtividadeFisicaFaz_Exercicios"),
-        score("AtividadeFisica_FazCaminhada")
-    ]),
-    "Relacionamentos": score(
-        "Relacionamento_CultivaAmigos"
-    ),
-    "Estresse": score(
-        "ControleEstresse_ReservaTempoRelaxar"
-    ),
-    "Saúde": score(
-        "Saude_AavaliacaoSaude"
-    ),
-    "Memória": score(
-        "Memoria_LembraCompromisso"
-    ),
-    "Humor": score(
-        "Humor_Felicidade"
-    )
-}
-
-categorias = list(radar.keys())
-valores = list(radar.values())
-
-categorias.append(categorias[0])
-valores.append(valores[0])
-
-fig = go.Figure()
-
-fig.add_trace(
-    go.Scatterpolar(
-        r=valores,
-        theta=categorias,
-        fill="toself"
-    )
-)
-
-fig.update_layout(
-    polar=dict(
-        radialaxis=dict(
-            visible=True,
-            range=[0,100]
-        )
-    )
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
-
-# =====================================================
-# HÁBITOS
-# =====================================================
-
-st.subheader("Hábitos Saudáveis")
-
-c1,c2 = st.columns(2)
-
-with c1:
-
-    if "Nutricao_ComeVerduras" in df.columns:
-
-        fig = px.histogram(
-            df,
-            x="Nutricao_ComeVerduras",
-            title="Consumo de Verduras"
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
-
-with c2:
-
-    if "Nutricao_ComeGordura" in df.columns:
-
-        fig = px.histogram(
-            df,
-            x="Nutricao_ComeGordura",
-            title="Consumo de Gordura"
         )
 
         st.plotly_chart(
