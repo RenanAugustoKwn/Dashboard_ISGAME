@@ -389,7 +389,7 @@ if col_nascimento:
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
-    kpi("Participantes", participantes_tcle)
+    kpi("Total Participantes TCLE", participantes_tcle)
 
 with col2:
     kpi("Registros", len(df))
