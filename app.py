@@ -17,37 +17,74 @@ st.set_page_config(
 )
 
 # =====================================================
-# CSS
+# CSS MODERNO (FORÇADO DARK PRETO)
 # =====================================================
 
 st.markdown("""
 <style>
+
+/* Fundo geral preto */
 .stApp {
-    background-color: #0A0A0F;
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    font-family: "Inter", sans-serif;
 }
 
+/* Sidebar */
 [data-testid="stSidebar"] {
-    background-color: #171721;
+    background-color: #0A0A0F !important;
+    border-right: 1px solid rgba(255,255,255,0.08);
 }
 
-.kpi-card{
-    background:#171721;
-    padding:20px;
-    border-radius:16px;
-    text-align:center;
-    border:1px solid rgba(255,255,255,0.08);
+/* Cards KPI */
+.kpi-card {
+    background: #0A0A0F;
+    padding: 22px;
+    border-radius: 16px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    transition: all 0.2s ease;
 }
 
-.kpi-title{
-    color:#FFFFFF;
-    font-size:14px;
+.kpi-card:hover {
+    transform: translateY(-4px);
+    border-color: #6C5CE7;
 }
 
-.kpi-value{
-    font-size:30px;
-    font-weight:bold;
-    color:white;
+.kpi-title {
+    color: rgba(255,255,255,0.6);
+    font-size: 13px;
+    letter-spacing: 0.3px;
 }
+
+.kpi-value {
+    font-size: 34px;
+    font-weight: 800;
+    color: #FFFFFF;
+}
+
+/* Títulos gerais */
+h1, h2, h3 {
+    color: #FFFFFF !important;
+}
+
+/* Dataframe */
+div[data-testid="stDataFrame"] {
+    background-color: #0A0A0F;
+    border-radius: 12px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 10px;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -60,20 +97,14 @@ def carregar_dados():
 
     pasta_raiz = Path("dados")
 
-    arquivos = list(
-        pasta_raiz.glob("*/resultado_final.xlsx")
-    )
+    arquivos = list(pasta_raiz.glob("*/resultado_final.xlsx"))
 
     dfs = []
 
     for arquivo in arquivos:
 
         try:
-
-            df = pd.read_excel(
-                arquivo,
-                engine="openpyxl"
-            )
+            df = pd.read_excel(arquivo, engine="openpyxl")
 
             df.columns = (
                 df.columns
@@ -81,7 +112,7 @@ def carregar_dados():
                 .str.strip()
             )
 
-            # Nome da pasta = Unidade
+            # Unidade (nome da pasta)
             df["Unidade"] = arquivo.parent.name
 
             dfs.append(df)
@@ -89,16 +120,13 @@ def carregar_dados():
         except Exception as e:
             st.warning(f"Erro ao carregar {arquivo}: {e}")
 
-    if len(dfs) == 0:
+    if not dfs:
         return pd.DataFrame()
 
-    return pd.concat(
-        dfs,
-        ignore_index=True
-    )
+    return pd.concat(dfs, ignore_index=True)
+
 
 df = carregar_dados()
-
 # =====================================================
 # DIAGNÓSTICO
 # =====================================================
@@ -301,14 +329,39 @@ if col_tcle:
 
     participantes_tcle = (
         df[col_tcle]
-        .fillna("")
+        .fillna(False)              # NaN -> False
+        .replace({
+            True: "true",
+            False: "false",
+            1: "true",
+            0: "false",
+            1.0: "true",
+            0.0: "false",
+        })
         .astype(str)
         .str.strip()
         .str.lower()
-        .isin(["true", "sim", "1"])
+        .replace({
+            "1": "true",
+            "0": "false",
+            "sim": "true",
+            "não": "false",
+            "nao": "false",
+            "yes": "true",
+            "no": "false",
+            "y": "true",
+            "n": "false",
+            "s": "true",
+            "f": "false",
+            "verdadeiro": "true",
+            "falso": "false",
+            "none": "false",
+            "nan": "false",
+            "": "false"
+        })
+        .eq("true")
         .sum()
     )
-
 # =====================================================
 # IDADE MÉDIA
 # =====================================================
