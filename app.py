@@ -1,198 +1,482 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import plotly.express as px
+import plotly.graph_objects as go
 from pathlib import Path
 
-import pandas as pd
-import plotly.express as px
-import streamlit as st
-
-from data_utils import (
-    FAIXAS_ETARIAS,
-    encontrar_coluna,
-    percentual_resposta,
-    preparar_dados,
-    resumo_tcle,
-)
-
-
-BASE_DIR = Path(__file__).resolve().parent
-PASTA_DADOS = BASE_DIR / "dados"
-
+# =====================================================
+# CONFIG
+# =====================================================
 
 st.set_page_config(
     page_title="Dashboard Saúde e Bem-Estar",
     page_icon="🏥",
-    layout="wide",
+    layout="wide"
 )
 
-st.markdown(
-    """
-    <style>
-    .stApp { background-color: #000000; color: #FFFFFF; font-family: "Inter", sans-serif; }
-    [data-testid="stSidebar"] { background-color: #0A0A0F; border-right: 1px solid rgba(255,255,255,0.08); }
-    .kpi-card { background: #0A0A0F; min-height: 120px; padding: 20px; border-radius: 16px;
-        text-align: center; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
-    .kpi-title { color: rgba(255,255,255,0.65); font-size: 13px; letter-spacing: 0.3px; }
-    .kpi-value { font-size: 30px; font-weight: 800; color: #FFFFFF; margin-top: 8px; }
-    .kpi-detail { color: rgba(255,255,255,0.55); font-size: 12px; margin-top: 6px; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# =====================================================
+# CSS MODERNO (FORÇADO DARK PRETO)
+# =====================================================
 
+st.markdown("""
+<style>
 
-@st.cache_data(ttl=300, show_spinner="Carregando planilhas...")
-def carregar_dados(pasta_raiz: str) -> tuple[pd.DataFrame, tuple[str, ...]]:
-    arquivos = sorted(
-        Path(pasta_raiz).glob("*/resultado_final.xlsx"),
-        key=lambda item: item.parent.name.casefold(),
-    )
-    dataframes: list[pd.DataFrame] = []
-    erros: list[str] = []
+/* Fundo geral preto */
+.stApp {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    font-family: "Inter", sans-serif;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #0A0A0F !important;
+    border-right: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Cards KPI */
+.kpi-card {
+    background: #0A0A0F;
+    padding: 22px;
+    border-radius: 16px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    transition: all 0.2s ease;
+}
+
+.kpi-card:hover {
+    transform: translateY(-4px);
+    border-color: #6C5CE7;
+}
+
+.kpi-title {
+    color: rgba(255,255,255,0.6);
+    font-size: 13px;
+    letter-spacing: 0.3px;
+}
+
+.kpi-value {
+    font-size: 34px;
+    font-weight: 800;
+    color: #FFFFFF;
+}
+
+/* Títulos gerais */
+h1, h2, h3 {
+    color: #FFFFFF !important;
+}
+
+/* Dataframe */
+div[data-testid="stDataFrame"] {
+    background-color: #0A0A0F;
+    border-radius: 12px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 10px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================
+# DADOS
+# =====================================================
+
+@st.cache_data
+def carregar_dados():
+
+    pasta_raiz = Path("dados")
+
+    arquivos = list(pasta_raiz.glob("*/resultado_final.xlsx"))
+
+    dfs = []
 
     for arquivo in arquivos:
+
         try:
-            dados_unidade = pd.read_excel(arquivo, engine="openpyxl")
-            dados_unidade.columns = dados_unidade.columns.astype(str).str.strip()
-            dados_unidade["Unidade"] = arquivo.parent.name.strip().replace("\u200b", "")
-            dataframes.append(dados_unidade)
-        except Exception as erro:
-            erros.append(f"{arquivo.parent.name}: {erro}")
+            df = pd.read_excel(arquivo, engine="openpyxl")
 
-    if not dataframes:
-        return pd.DataFrame(), tuple(erros)
-    return pd.concat(dataframes, ignore_index=True), tuple(erros)
+            df.columns = (
+                df.columns
+                .astype(str)
+                .str.strip()
+            )
+
+            # Unidade (nome da pasta)
+            df["Unidade"] = arquivo.parent.name
+
+            dfs.append(df)
+
+        except Exception as e:
+            st.warning(f"Erro ao carregar {arquivo}: {e}")
+
+    if not dfs:
+        return pd.DataFrame()
+
+    return pd.concat(dfs, ignore_index=True)
 
 
-def kpi(titulo: str, valor: str | int, detalhe: str = "") -> None:
+df = carregar_dados()
+# =====================================================
+# DIAGNÓSTICO
+# =====================================================
+
+st.success(
+    f"Registros carregados: {len(df)}"
+)
+
+
+# =====================================================
+# HEADER
+# =====================================================
+
+st.title("🏥 Dashboard Saúde e Bem-Estar")
+
+st.caption(
+    "Indicadores de Qualidade de Vida, Saúde Física, Memória e Humor"
+)
+# =====================================================
+# FUNÇÕES AUXILIARES
+# =====================================================
+
+def encontrar_coluna(final_nome):
+    """
+    Procura uma coluna pelo final do nome,
+    ignorando maiúsculas/minúsculas.
+
+    Exemplo:
+        respostasDemografico.sexo
+        respostasDemografico.dataNascimento
+        respostasHumor.felicidade
+    """
+
+    final_nome = final_nome.lower()
+
+    for coluna in df.columns:
+        if coluna.lower().endswith(final_nome):
+            return coluna
+
+    return None
+
+
+def percentual(final_coluna, valor):
+
+    coluna = encontrar_coluna(final_coluna)
+
+    if coluna is None:
+        return 0.0
+
+    serie = (
+        df[coluna]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+
+    return round(
+        serie.eq(str(valor).strip().lower()).mean() * 100,
+        1
+    )
+
+
+def kpi(titulo, valor):
+
     st.markdown(
         f"""
         <div class="kpi-card">
             <div class="kpi-title">{titulo}</div>
             <div class="kpi-value">{valor}</div>
-            <div class="kpi-detail">{detalhe}</div>
         </div>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
 
+# =====================================================
+# IDADE
+# =====================================================
 
-def valor_percentual(percentual: float | None) -> str:
-    return "—" if percentual is None else f"{percentual:.1f}%"
+col_nascimento = (
+    encontrar_coluna("Demografico.dataNascimento")
+    or encontrar_coluna("Demografico.anoNascimento")
+)
 
+if col_nascimento:
+
+    nascimento = pd.to_datetime(
+        df[col_nascimento],
+        errors="coerce",
+        dayfirst=True
+    )
+
+    hoje = pd.Timestamp.today()
+
+    df["Idade"] = (
+        hoje.year
+        - nascimento.dt.year
+        - (
+            (hoje.month < nascimento.dt.month)
+            | (
+                (hoje.month == nascimento.dt.month)
+                & (hoje.day < nascimento.dt.day)
+            )
+        ).astype(int)
+    )
+
+else:
+
+    df["Idade"] = np.nan
+
+
+def faixa_etaria(idade):
+
+    if pd.isna(idade):
+        return "Não informado"
+
+    if idade < 50:
+        return "<50"
+    elif idade < 60:
+        return "50-59"
+    elif idade < 70:
+        return "60-69"
+    elif idade < 80:
+        return "70-79"
+    else:
+        return "80+"
+
+
+df["FaixaEtaria"] = df["Idade"].apply(faixa_etaria)
+# =====================================================
+# FILTROS
+# =====================================================
 
 st.sidebar.title("Filtros")
-if st.sidebar.button("Atualizar dados"):
-    carregar_dados.clear()
-    st.rerun()
 
-df_bruto, erros = carregar_dados(str(PASTA_DADOS))
-if df_bruto.empty:
-    st.error("Nenhuma planilha válida foi encontrada em dados/*/resultado_final.xlsx.")
-    if erros:
-        st.caption(" | ".join(erros))
-    st.stop()
+total_original = len(df)
 
-df_bruto = preparar_dados(df_bruto)
-if erros:
-    st.warning("Algumas planilhas não foram carregadas: " + " | ".join(erros))
+if "Unidade" not in df.columns:
+    df["Unidade"] = "Sem Unidade"
 
-unidades = sorted(df_bruto["Unidade"].dropna().unique(), key=str.casefold)
-unidades_selecionadas = st.sidebar.multiselect("Unidades", options=unidades, default=unidades)
-df = df_bruto.loc[df_bruto["Unidade"].isin(unidades_selecionadas)].copy()
-
-st.sidebar.metric("Registros carregados", len(df_bruto))
-st.sidebar.metric("Após filtro", len(df))
-
-st.title("🏥 Dashboard Saúde e Bem-Estar")
-st.caption(
-    "Participação e perfil demográfico das respostas coletadas. "
-    "Dados individuais identificáveis não são exibidos."
+df["Unidade"] = (
+    df["Unidade"]
+    .fillna("Sem Unidade")
+    .astype(str)
+    .str.strip()
 )
 
-if df.empty:
-    st.info("Selecione pelo menos uma unidade para visualizar os indicadores.")
-    st.stop()
+df.loc[
+    df["Unidade"].isin([
+        "",
+        "nan",
+        "None",
+        "N/A"
+    ]),
+    "Unidade"
+] = "Sem Unidade"
 
-confirmados_tcle, respondidos_tcle = resumo_tcle(df)
-idade_valida = df["Idade"].dropna()
-idade_media = "—" if idade_valida.empty else f"{idade_valida.mean():.1f} anos"
-percentual_mulheres, base_sexo = percentual_resposta(df, "Demografico.sexo", "Feminino")
-percentual_homens, _ = percentual_resposta(df, "Demografico.sexo", "Masculino")
-percentual_sozinhos, base_mora_sozinho = percentual_resposta(
-    df, "Demografico.moraSozinho", "Sim"
+unidades = sorted(df["Unidade"].unique())
+
+unidades_selecionadas = st.sidebar.multiselect(
+    "Unidades",
+    options=unidades,
+    default=unidades
 )
 
-colunas_kpi = st.columns(6)
-with colunas_kpi[0]:
-    kpi("Registros", len(df), "após filtro")
-with colunas_kpi[1]:
-    kpi("TCLE confirmado", confirmados_tcle, f"{respondidos_tcle} respostas válidas")
-with colunas_kpi[2]:
-    kpi("Idade média", idade_media, f"base de {len(idade_valida)} registros")
-with colunas_kpi[3]:
-    kpi("% Mulheres", valor_percentual(percentual_mulheres), f"base de {base_sexo} respostas")
-with colunas_kpi[4]:
-    kpi("% Homens", valor_percentual(percentual_homens), f"base de {base_sexo} respostas")
-with colunas_kpi[5]:
+df = df[
+    df["Unidade"].isin(unidades_selecionadas)
+]
+
+st.sidebar.metric(
+    "Total de Registros",
+    total_original
+)
+
+st.sidebar.metric(
+    "Após Filtro",
+    len(df)
+)
+
+# =====================================================
+# COLUNAS ENCONTRADAS (DEBUG)
+# =====================================================
+
+COL_SEXO = encontrar_coluna("sexo")
+COL_MORA_SOZINHO = encontrar_coluna("moraSozinho")
+COL_TCLE = encontrar_coluna("participanteTCLE")
+COL_NASCIMENTO = (
+    encontrar_coluna("dataNascimento")
+    or encontrar_coluna("anoNascimento")
+)
+# =====================================================
+# PARTICIPANTES TCLE
+# =====================================================
+
+participantes_tcle = 0
+
+col_tcle = encontrar_coluna("participanteTCLE")
+
+if col_tcle:
+
+    participantes_tcle = (
+        df[col_tcle]
+        .fillna(False)              # NaN -> False
+        .replace({
+            True: "true",
+            False: "false",
+            1: "true",
+            0: "false",
+            1.0: "true",
+            0.0: "false",
+        })
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({
+            "1": "true",
+            "0": "false",
+            "sim": "true",
+            "não": "false",
+            "nao": "false",
+            "yes": "true",
+            "no": "false",
+            "y": "true",
+            "n": "false",
+            "s": "true",
+            "f": "false",
+            "verdadeiro": "true",
+            "falso": "false",
+            "none": "false",
+            "nan": "false",
+            "": "false"
+        })
+        .eq("true")
+        .sum()
+    )
+# =====================================================
+# IDADE MÉDIA
+# =====================================================
+
+idade_media = "-"
+
+col_nascimento = encontrar_coluna("Demografico.anoNascimento")
+
+if col_nascimento:
+
+    df["Idade"] = (
+        datetime.now().year -
+        pd.to_numeric(
+            df[col_nascimento],
+            errors="coerce"
+        )
+    )
+
+    idade_media = round(df["Idade"].mean(), 1)
+
+# =====================================================
+# KPIs
+# =====================================================
+
+col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+with col1:
+    kpi("Total Participantes TCLE", participantes_tcle)
+
+with col2:
+    kpi("Registros", len(df))
+
+with col3:
+    kpi("Idade Média", idade_media)
+
+with col4:
     kpi(
-        "% Mora sozinho",
-        valor_percentual(percentual_sozinhos),
-        f"base de {base_mora_sozinho} respostas",
+        "% Mulheres",
+        f"{percentual('Demografico.sexo', 'Feminino')}%"
+    )
+
+with col5:
+    kpi(
+        "% Homens",
+        f"{percentual('Demografico.sexo', 'Masculino')}%"
+    )
+
+with col6:
+    kpi(
+        "% Mora Sozinho",
+        f"{percentual('Demografico.moraSozinho', 'Sim')}%"
     )
 
 st.divider()
-grafico_faixa, grafico_sexo = st.columns(2)
+# =====================================================
+# DEMOGRÁFICO
+# =====================================================
 
-with grafico_faixa:
+c1, c2 = st.columns(2)
+
+with c1:
+
     faixa_df = (
-        df["Faixa etária"]
+        df["FaixaEtaria"]
+        .dropna()
         .value_counts()
-        .reindex(FAIXAS_ETARIAS, fill_value=0)
-        .rename_axis("Faixa etária")
+        .rename_axis("Faixa")
         .reset_index(name="Quantidade")
     )
-    figura_faixa = px.bar(
+
+    fig = px.bar(
         faixa_df,
-        x="Faixa etária",
+        x="Faixa",
         y="Quantidade",
         text="Quantidade",
-        category_orders={"Faixa etária": FAIXAS_ETARIAS},
-        title="Distribuição por faixa etária",
-        template="plotly_dark",
-        color_discrete_sequence=["#6C5CE7"],
+        title="Distribuição por Faixa Etária"
     )
-    figura_faixa.update_layout(paper_bgcolor="#000000", plot_bgcolor="#0A0A0F")
-    st.plotly_chart(figura_faixa, width="stretch")
 
-with grafico_sexo:
-    coluna_sexo = encontrar_coluna(df.columns, "Demografico.sexo")
-    if coluna_sexo:
-        sexo_df = df[coluna_sexo].fillna("Não informado").astype(str).str.strip()
-        figura_sexo = px.pie(
-            names=sexo_df,
-            hole=0.55,
-            title="Sexo",
-            template="plotly_dark",
-            color_discrete_sequence=["#6C5CE7", "#00CEC9", "#636E72"],
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+with c2:
+
+    if "respostasDemografico.sexo" in df.columns:
+
+        fig = px.pie(
+            df,
+            names="respostasDemografico.sexo",
+            hole=.55,
+            title="Sexo"
         )
-        figura_sexo.update_layout(paper_bgcolor="#000000", legend_title_text="")
-        st.plotly_chart(figura_sexo, width="stretch")
-    else:
-        st.info("A coluna de sexo não está disponível nos dados selecionados.")
 
-st.subheader("Dados anonimizados")
-coluna_sexo = encontrar_coluna(df.columns, "Demografico.sexo")
-coluna_mora_sozinho = encontrar_coluna(df.columns, "Demografico.moraSozinho")
-tabela_segura = pd.DataFrame(
-    {
-        "Unidade": df["Unidade"],
-        "Faixa etária": df["Faixa etária"],
-        "Origem da idade": df["Origem da idade"],
-        "Sexo": df[coluna_sexo] if coluna_sexo else "Não informado",
-        "Mora sozinho": df[coluna_mora_sozinho] if coluna_mora_sozinho else "Não informado",
-    }
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+# =====================================================
+# TABELA
+# =====================================================
+
+st.subheader("Dados")
+
+st.dataframe(
+    df,
+    use_container_width=True,
+    height=700
 )
-st.dataframe(tabela_segura, width="stretch", height=500, hide_index=True)
+
+# =====================================================
+# FOOTER
+# =====================================================
+
 st.caption(
-    "Idade derivada de data de nascimento quando disponível; quando há somente o ano, "
-    "a idade é estimada e pode variar em um ano."
+    f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
 )
